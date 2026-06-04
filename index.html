@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ceramic Tile Pattern Configurator - Texture Edition</title>
+    <style>
+        :root {
+            --bg-color: #f4f4f9;
+            --panel-bg: #ffffff;
+            --text-color: #333333;
+            --border-color: #dddddd;
+            --accent: #007bff;
+            --danger: #dc3545;
+            --success: #28a745;
+            --warning: #ffc107;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            height: 100vh;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+        }
+        #sidebar {
+            width: 360px;
+            background: var(--panel-bg);
+            border-right: 1px solid var(--border-color);
+            padding: 20px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            overflow-y: auto;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.05);
+            z-index: 10;
+        }
+        h2 {
+            font-size: 1.1rem;
+            margin: 10px 0 5px 0;
+            border-bottom: 2px solid var(--border-color);
+            padding-bottom: 5px;
+        }
+        .control-group { display: flex; flex-direction: column; gap: 5px; }
+        .button-group { display: flex; gap: 5px; }
+        .button-group button { flex: 1; }
+        label { font-size: 0.9rem; display: flex; justify-content: space-between; align-items: center; }
+        input[type="number"], input[type="range"] { width: 70px; padding: 4px; border: 1px solid var(--border-color); border-radius: 4px; }
+        input[type="range"] { width: 120px; padding: 0; border: none; }
+        input[type="color"] { width: 40px; height: 30px; padding: 0; border: 1px solid var(--border-color); border-radius: 4px; cursor: pointer; }
+        
+        button {
+            background-color: var(--accent); color: white; border: none;
+            padding: 8px 12px; border-radius: 4px; cursor: pointer;
+            font-size: 0.9rem; transition: background 0.2s;
+        }
+        button:hover { background-color: #0056b3; }
+        button.secondary { background-color: #6c757d; }
+        button.secondary:hover { background-color: #5a6268; }
+        button.danger { background-color: var(--danger); margin-top: auto; }
+        button.danger:hover { background-color: #c82333; }
+        button.success { background-color: var(--success); }
+        button.success:hover { background-color: #218838; }
+
+        button.tool-btn { display: flex; justify-content: space-between; align-items: center; }
+        button.tool-btn.active-erase { background-color: var(--danger); font-weight: bold; }
+        button.tool-btn.active-paint { background-color: var(--warning); color: #000; font-weight: bold; }
+        button.tool-btn.active-select { background-color: var(--accent); font-weight: bold; }
+        
+        #palette {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+        }
+        .palette-item {
+            min-height: 65px;
+            border: 2px solid var(--border-color);
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            font-size: 0.7rem;
+            font-weight: bold;
+            color: white;
+            text-shadow: 1px 1px 3px rgba(0,0,0,0.8);
+            box-sizing: border-box;
+            transition: transform 0.1s;
+            word-wrap: break-word;
+            padding: 4px;
+            line-height: 1.3;
+            background-size: cover;
+            background-position: center;
+        }
+        .palette-item span.dim { font-size: 0.65rem; font-weight: normal; opacity: 0.9; }
+        .palette-item:hover { transform: scale(1.05); }
+        .palette-item.active { border: 3px solid var(--accent); box-shadow: 0 0 8px rgba(0,123,255,0.5); transform: scale(1.05); }
+
+        .instructions { background: #e9ecef; padding: 10px; border-radius: 4px; font-size: 0.8rem; line-height: 1.4; }
+        
+        #workspace {
+            flex-grow: 1; overflow: auto; position: relative;
+            background-image: linear-gradient(#e5e5e5 1px, transparent 1px), linear-gradient(90deg, #e5e5e5 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+        canvas { display: block; cursor: crosshair; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+    </style>
+</head>
+<body>
+
+    <div id="sidebar">
+        <h2>Save & Load</h2>
+        <div class="button-group">
+            <button id="exportBtn" class="success">Save Design</button>
+            <button id="importBtn" class="secondary">Load Design</button>
+        </div>
+        <input type="file" id="fileInput" accept=".json" style="display: none;">
+
+        <h2>Global Settings</h2>
+        <div class="control-group">
+            <label>Zoom Level: <input type="range" id="zoomSlider" min="20" max="200" value="100"></label>
+            <label>Grout Width (px): <input type="number" id="groutWidth" value="3" min="0"></label>
+            <label>Grout Color: <input type="color" id="groutColor" value="#e6e6e6"></label>
+        </div>
+
+        <h2>Tile Palette</h2>
+        <div id="palette"></div>
+        
+        <div class="control-group" style="margin-top: 10px; background: #f8f9fa; padding: 10px; border-radius: 4px; border: 1px solid var(--border-color);">
+            <label style="margin-bottom:5px;"><strong>Create Custom Color Tile:</strong></label>
+            <label>Width (px): <input type="number" id="newTileW" value="50" min="10"></label>
+            <label>Height (px): <input type="number" id="newTileH" value="200" min="10"></label>
+            <label>Color: <input type="color" id="newTileC" value="#3498db"></label>
+            <button id="addTileBtn" style="margin-top: 5px;">Add to Palette</button>
+        </div>
+
+        <h2>Tools</h2>
+        <button id="rotateBtn" class="secondary tool-btn">Rotate Tile 90° <span>(R)</span></button>
+        <button id="selectBtn" class="secondary tool-btn">Select / Move Tool <span>(S)</span></button>
+        <button id="paintBtn" class="secondary tool-btn">Paint Color Tool <span>(P)</span></button>
+        <button id="eraserBtn" class="secondary tool-btn">Eraser Delete Tool <span>(D)</span></button>
+
+        <div class="instructions">
+            <strong>Hotkeys & Tricks:</strong><br>
+            • <b>Select Mode</b>: Click & drag over tiles to highlight, or drag highlighted tiles to move them.<br>
+            • <b>C / V</b>: Copy & Paste selected tiles.<br>
+            • <b>Esc</b>: Deselect all tiles.
+        </div>
+
+        <button id="clearBtn" class="danger">Clear Entire Canvas</button>
+    </div>
+
+    <div id="workspace">
+        <canvas id="tileCanvas" width="3000" height="3000"></canvas>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            
+            const kappaTiles = [
+                { id: 1, name: 'WHITE', c: '#f3f1e7', src: 'kappa-white.png' },
+                { id: 2, name: 'NUDE', c: '#ca9e85', src: 'kappa-nude.png' },
+                { id: 3, name: 'MUSTARD', c: '#ac9340', src: 'kappa-mustard.png' },
+                { id: 4, name: 'TANGERINE', c: '#ddab7d', src: 'kappa-tangerine.png' },
+                { id: 5, name: 'LOBSTER', c: '#cb5d38', src: 'kappa-lobster.png' },
+                { id: 6, name: 'BORDEAUX', c: '#6b2333', src: 'kappa-bordeaux.png' },
+                { id: 7, name: 'CACAO', c: '#372b19', src: 'kappa-cacao.png' },
+                { id: 8, name: 'GREEN', c: '#008e4e', src: 'kappa-green.png' },
+                { id: 9, name: 'MINT', c: '#a4cdbb', src: 'kappa-mint.png' },
+                { id: 10, name: 'TUAREG', c: '#679dd7', src: 'kappa-tuareg.png' },
+                { id: 11, name: 'OCEAN', c: '#133a6d', src: 'kappa-ocean.png' },
+                { id: 12, name: 'MUSK', c: '#99a9a4', src: 'kappa-musk.png' },
+                { id: 13, name: 'RAW', c: '#d5d0c9', src: 'kappa-raw.png' },
+                { id: 14, name: 'M. LAVANDER', c: '#9ba7c1', w: 10, src: 'matita-lavander.png' }, 
+                { id: 15, name: 'M. BERRY', c: '#e68d7d', w: 10, src: 'matita-berry.png' },
+                { id: 16, name: 'M. ALOE', c: '#bdd9c0', w: 10, src: 'matita-aloe.png' },
+                { id: 17, name: 'M. COTTO', c: '#c89272', w: 10, src: 'matita-cotto.png' },
+                { id: 18, name: 'M. WOOD', c: '#e3d5be', w: 10, src: 'matita-wood.png' }
+            ];
+
+            const initialPalette = kappaTiles.map(tile => {
+                return {
+                    id: tile.id,
+                    name: tile.name,
+                    w: tile.w ? tile.w : 50,    
+                    h: tile.h ? tile.h : 200,   
+                    c: tile.c,
+                    src: tile.src
+                };
+            });
+
+            // Image Pre-loader cache
+            const loadedImages = {};
+            initialPalette.forEach(tile => {
+                if (tile.src) {
+                    const img = new Image();
+                    img.src = tile.src;
+                    img.onload = () => draw(); 
+                    loadedImages[tile.id] = img;
+                }
+            });
+
+            // Master Application State
+            const state = {
+                mode: 'place', 
+                zoom: 1.0,
+                groutWidth: 3,
+                groutColor: '#e6e6e6',
+                palette: initialPalette,
+                selectedTileId: 1,
+                isRotated: false,
+                placedTiles: [], 
+                
+                mouseX: 0, mouseY: 0,
+                isMouseOver: false,
+                isDragging: false,
+                selectionBox: { x: 0, y: 0, w: 0, h: 0 },
+                
+                selectedTiles: [], 
+                isDraggingSelection: false,
+                dragStartX: 0, dragStartY: 0,
+                dragAnchor: null,
+                selectionStartPos: [],
+                clipboard: []      
+            };
+
+            const canvas = document.getElementById('tileCanvas');
+            const ctx = canvas.getContext('2d');
+            const container = document.getElementById('palette');
+            
+            const btns = {
+                erase: document.getElementById('eraserBtn'),
+                paint: document.getElementById('paintBtn'),
+                select: document.getElementById('selectBtn'),
+            };
+
+            // Save & Load Logic
+            document.getElementById('exportBtn').onclick = () => {
+                const dataToSave = {
+                    groutWidth: state.groutWidth,
+                    groutColor: state.groutColor,
+                    palette: state.palette,
+                    placedTiles: state.placedTiles
+                };
+                
+                const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(dataToSave));
+                const downloadAnchorNode = document.createElement('a');
+                downloadAnchorNode.setAttribute("href", dataStr);
+                downloadAnchorNode.setAttribute("download", "tile-pattern.json");
+                document.body.appendChild(downloadAnchorNode); 
+                downloadAnchorNode.click();
+                downloadAnchorNode.remove();
+            };
+
+            const fileInput = document.getElementById('fileInput');
+            document.getElementById('importBtn').onclick = () => fileInput.click();
+
+            fileInput.addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (!file) return;
+                
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    try {
+                        const importedData = JSON.parse(e.target.result);
+                        if (importedData.placedTiles) {
+                            state.groutWidth = importedData.groutWidth !== undefined ? importedData.groutWidth : 3;
+                            state.groutColor = importedData.groutColor || '#e6e6e6';
+                            state.palette = importedData.palette || initialPalette;
+                            state.placedTiles = importedData.placedTiles;
+                            
+                            document.getElementById('groutWidth').value = state.groutWidth;
+                            document.getElementById('groutColor').value = state.groutColor;
+                            
+                            state.selectedTiles = [];
+                            setMode('place');
+                            renderPalette();
+                            draw();
+                        } else {
+                            alert("Invalid or corrupted design file.");
+                        }
+                    } catch (err) {
+                        alert("Error reading file. Make sure it is a valid JSON file.");
+                    }
+                };
+                reader.readAsText(file);
+                e.target.value = ""; 
+            });
+
+            // Setup Sidebar Palette UI
+            function renderPalette() {
+                container.innerHTML = '';
+                state.palette.forEach(tile => {
+                    const el = document.createElement('div');
+                    el.className = `palette-item ${state.selectedTileId === tile.id ? 'active' : ''}`;
+                    
+                    if (tile.src) {
+                        el.style.backgroundColor = tile.c; 
+                        el.style.backgroundImage = `url('${tile.src}')`;
+                    } else {
+                        el.style.backgroundColor = tile.c;
+                    }
+                    
+                    el.innerHTML = `<span>${tile.name}</span><span class="dim">${tile.w} x ${tile.h}</span>`;
+                    
+                    if (tile.name === 'WHITE' || tile.name === 'RAW') {
+                        el.style.color = '#333333';
+                        el.style.textShadow = 'none';
+                    }
+
+                    el.onclick = () => {
+                        if (state.mode !== 'paint') setMode('place');
+                        state.selectedTileId = tile.id;
+                        state.isRotated = false;
+                        renderPalette();
+                        draw();
+                    };
+                    container.appendChild(el);
+                });
+            }
+
+            // Mode Switching Logic
+            function setMode(newMode) {
+                state.mode = (state.mode === newMode) ? 'place' : newMode;
+                
+                btns.erase.className = 'secondary tool-btn';
+                btns.paint.className = 'secondary tool-btn';
+                btns.select.className = 'secondary tool-btn';
+                canvas.style.cursor = 'crosshair';
+
+                if (state.mode === 'erase') {
+                    btns.erase.classList.add('active-erase');
+                    canvas.style.cursor = 'not-allowed';
+                } else if (state.mode === 'paint') {
+                    btns.paint.classList.add('active-paint');
+                    canvas.style.cursor = 'cell';
+                } else if (state.mode === 'select') {
+                    btns.select.classList.add('active-select');
+                }
+                draw();
+            }
+
+            btns.erase.onclick = () => setMode('erase');
+            btns.paint.onclick = () => setMode('paint');
+            btns.select.onclick = () => setMode('select');
+            document.getElementById('rotateBtn').onclick = () => { state.isRotated = !state.isRotated; draw(); };
+            
+            document.getElementById('zoomSlider').addEventListener('input', (e) => {
+                state.zoom = parseInt(e.target.value) / 100;
+                draw();
+            });
+
+            document.getElementById('addTileBtn').onclick = () => {
+                const newId = Date.now();
+                state.palette.push({
+                    id: newId,
+                    name: 'CUSTOM',
+                    w: parseInt(document.getElementById('newTileW').value) || 50,
+                    h: parseInt(document.getElementById('newTileH').value) || 200,
+                    c: document.getElementById('newTileC').value
+                });
+                setMode('place');
+                state.selectedTileId = newId;
+                state.isRotated = false;
+                renderPalette();
+                draw();
+            };
+
+            document.getElementById('groutWidth').addEventListener('input', (e) => { state.groutWidth = parseInt(e.target.value) || 0; draw(); });
+            document.getElementById('groutColor').addEventListener('input', (e) => { state.groutColor = e.target.value; draw(); });
+            
+            document.getElementById('clearBtn').onclick = () => {
+                if (confirm("Are you sure you want to clear the canvas?")) {
+                    state.placedTiles = [];
+                    state.selectedTiles = [];
+                    draw();
+                }
+            };
+
+            // Keyboard Shortcuts
+            window.addEventListener('keydown', (e) => {
+                const key = e.key.toLowerCase();
+                
+                if (key === 'r') { state.isRotated = !state.isRotated; draw(); }
+                if (key === 'd') setMode('erase');
+                if (key === 'p') setMode('paint');
+                if (key === 's') setMode('select');
+                if (key === 'escape') { state.selectedTiles = []; draw(); }
+
+                // COPY
+                if ((key === 'c' || (e.ctrlKey && key === 'c') || (e.metaKey && key === 'c')) && state.selectedTiles.length > 0) {
+                    let minX = Math.min(...state.selectedTiles.map(t => t.x));
+                    let minY = Math.min(...state.selectedTiles.map(t => t.y));
+                    state.clipboard = state.selectedTiles.map(t => ({
+                        dx: t.x - minX, dy: t.y - minY, w: t.w, h: t.h, c: t.c, 
+                        baseId: t.baseId, isRotated: t.isRotated 
+                    }));
+                }
+
+                // PASTE
+                if ((key === 'v' || (e.ctrlKey && key === 'v') || (e.metaKey && key === 'v')) && state.clipboard.length > 0 && state.isMouseOver) {
+                    setMode('select'); 
+                    let snapX = Math.round(state.mouseX / 10) * 10;
+                    let snapY = Math.round(state.mouseY / 10) * 10;
+                    
+                    state.clipboard.forEach(t => {
+                        state.placedTiles.push({
+                            x: snapX + t.dx, y: snapY + t.dy, w: t.w, h: t.h, c: t.c,
+                            baseId: t.baseId, isRotated: t.isRotated
+                        });
+                    });
+                    
+                    state.selectedTiles = state.placedTiles.slice(-state.clipboard.length);
+                    draw();
+                }
+            });
+
+            function getActiveDimensions() {
+                const tile = state.palette.find(t => t.id === state.selectedTileId) || { id: 0, w: 50, h: 200, c: '#000000' };
+                return {
+                    id: tile.id,
+                    w: state.isRotated ? tile.h : tile.w,
+                    h: state.isRotated ? tile.w : tile.h,
+                    c: tile.c,
+                    isRotated: state.isRotated
+                };
+            }
+
+            // Mouse Interaction Logic (Factoring in Zoom)
+            canvas.addEventListener('mousemove', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                
+                // Adjust for zoom scale dynamically
+                state.mouseX = ((e.clientX - rect.left) * scaleX) / state.zoom;
+                state.mouseY = ((e.clientY - rect.top) * scaleY) / state.zoom;
+                
+                state.isMouseOver = true;
+
+                if (state.mode === 'select') {
+                    let hoveringSelection = state.selectedTiles.some(t => 
+                        state.mouseX >= t.x && state.mouseX <= t.x + t.w && 
+                        state.mouseY >= t.y && state.mouseY <= t.y + t.h
+                    );
+
+                    if (state.isDraggingSelection) {
+                        canvas.style.cursor = 'grabbing';
+                        
+                        let anchorStart = state.selectionStartPos.find(s => s.t === state.dragAnchor);
+                        let targetX = anchorStart.x + (state.mouseX - state.dragStartX);
+                        let targetY = anchorStart.y + (state.mouseY - state.dragStartY);
+
+                        let unselectedTiles = state.placedTiles.filter(t => !state.selectedTiles.includes(t));
+                        let tempPlaced = state.placedTiles;
+                        state.placedTiles = unselectedTiles;
+
+                        let pos = getSnappedPosition(targetX, targetY, state.dragAnchor.w, state.dragAnchor.h);
+
+                        state.placedTiles = tempPlaced;
+
+                        let actualDx = pos.x - anchorStart.x;
+                        let actualDy = pos.y - anchorStart.y;
+
+                        state.selectionStartPos.forEach(s => {
+                            s.t.x = s.x + actualDx;
+                            s.t.y = s.y + actualDy;
+                        });
+
+                    } else if (state.isDragging) {
+                        state.selectionBox.w = state.mouseX - state.selectionBox.x;
+                        state.selectionBox.h = state.mouseY - state.selectionBox.y;
+                        canvas.style.cursor = 'crosshair';
+                    } else {
+                        canvas.style.cursor = hoveringSelection ? 'grab' : 'crosshair';
+                    }
+                }
+                draw();
+            });
+
+            canvas.addEventListener('mouseleave', () => {
+                state.isMouseOver = false;
+                if (state.isDragging) state.isDragging = false;
+                if (state.isDraggingSelection) state.isDraggingSelection = false;
+                draw();
+            });
+
+            canvas.addEventListener('mousedown', (e) => {
+                if (e.button !== 0) return; 
+
+                if (state.mode === 'select') {
+                    let clickedSelected = state.selectedTiles.some(t => 
+                        state.mouseX >= t.x && state.mouseX <= t.x + t.w && 
+                        state.mouseY >= t.y && state.mouseY <= t.y + t.h
+                    );
+
+                    if (clickedSelected) {
+                        state.isDraggingSelection = true;
+                        state.dragStartX = state.mouseX;
+                        state.dragStartY = state.mouseY;
+                        state.dragAnchor = state.selectedTiles[0]; 
+                        state.selectionStartPos = state.selectedTiles.map(t => ({ t: t, x: t.x, y: t.y }));
+                        return;
+                    }
+
+                    state.isDragging = true;
+                    state.selectionBox = { x: state.mouseX, y: state.mouseY, w: 0, h: 0 };
+                    
+                    if (!e.shiftKey) state.selectedTiles = []; 
+                } 
+                else if (state.mode === 'erase') {
+                    for (let i = state.placedTiles.length - 1; i >= 0; i--) {
+                        const t = state.placedTiles[i];
+                        if (state.mouseX >= t.x && state.mouseX <= t.x + t.w && state.mouseY >= t.y && state.mouseY <= t.y + t.h) {
+                            state.placedTiles.splice(i, 1);
+                            state.selectedTiles = state.selectedTiles.filter(st => st !== t);
+                            break;
+                        }
+                    }
+                } 
+                else if (state.mode === 'paint') {
+                    const active = getActiveDimensions();
+                    for (let i = state.placedTiles.length - 1; i >= 0; i--) {
+                        const t = state.placedTiles[i];
+                        if (state.mouseX >= t.x && state.mouseX <= t.x + t.w && state.mouseY >= t.y && state.mouseY <= t.y + t.h) {
+                            t.c = active.c;
+                            t.baseId = active.id;
+                            break;
+                        }
+                    }
+                } 
+                else if (state.mode === 'place') {
+                    const active = getActiveDimensions();
+                    const pos = getSnappedPosition(state.mouseX, state.mouseY, active.w, active.h);
+                    state.placedTiles.push({
+                        x: pos.x, y: pos.y, w: active.w, h: active.h, c: active.c, 
+                        baseId: active.id, isRotated: active.isRotated
+                    });
+                }
+                draw();
+            });
+
+            canvas.addEventListener('mouseup', (e) => {
+                if (e.button !== 0) return;
+                
+                if (state.mode === 'select') {
+                    if (state.isDraggingSelection) {
+                        state.isDraggingSelection = false;
+                        draw();
+                        return;
+                    }
+
+                    if (state.isDragging) {
+                        state.isDragging = false;
+                        
+                        let rx = state.selectionBox.w < 0 ? state.selectionBox.x + state.selectionBox.w : state.selectionBox.x;
+                        let ry = state.selectionBox.h < 0 ? state.selectionBox.y + state.selectionBox.h : state.selectionBox.y;
+                        let rw = Math.abs(state.selectionBox.w);
+                        let rh = Math.abs(state.selectionBox.h);
+
+                        state.placedTiles.forEach(t => {
+                            if (t.x < rx + rw && t.x + t.w > rx && t.y < ry + rh && t.y + t.h > ry) {
+                                if (!state.selectedTiles.includes(t)) {
+                                    state.selectedTiles.push(t);
+                                }
+                            }
+                        });
+                        state.selectionBox = { x: 0, y: 0, w: 0, h: 0 };
+                        draw();
+                    }
+                }
+            });
+
+            function getSnappedPosition(mx, my, previewW, previewH) {
+                let snapX = Math.round(mx / 10) * 10;
+                let snapY = Math.round(my / 10) * 10;
+                
+                // Adjust snapping strength based on zoom level so it feels consistent
+                const snapDist = 15 / state.zoom; 
+                const gw = state.groutWidth;
+
+                let xLines = [0]; let yLines = [0]; 
+
+                state.placedTiles.forEach(t => {
+                    xLines.push(t.x); 
+                    xLines.push(t.x + t.w - previewW); 
+                    xLines.push(t.x + t.w + gw); 
+                    xLines.push(t.x - previewW - gw); 
+                    yLines.push(t.y); 
+                    yLines.push(t.y + t.h - previewH); 
+                    yLines.push(t.y + t.h + gw); 
+                    yLines.push(t.y - previewH - gw); 
+                });
+
+                let minDiffX = snapDist;
+                xLines.forEach(line => { if (Math.abs(mx - line) < minDiffX) { minDiffX = Math.abs(mx - line); snapX = line; }});
+                let minDiffY = snapDist;
+                yLines.forEach(line => { if (Math.abs(my - line) < minDiffY) { minDiffY = Math.abs(my - line); snapY = line; }});
+
+                return { x: snapX, y: snapY };
+            }
+
+            canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+            function drawSingleTile(ctx, t, alpha = 1.0) {
+                ctx.globalAlpha = alpha;
+                const img = loadedImages[t.baseId];
+                
+                if (img && img.complete && img.naturalWidth !== 0) {
+                    ctx.save();
+                    ctx.translate(t.x + t.w / 2, t.y + t.h / 2);
+                    
+                    if (t.isRotated) {
+                        ctx.rotate(90 * Math.PI / 180);
+                        ctx.drawImage(img, -t.h / 2, -t.w / 2, t.h, t.w);
+                    } else {
+                        ctx.drawImage(img, -t.w / 2, -t.h / 2, t.w, t.h);
+                    }
+                    ctx.restore();
+                } else {
+                    ctx.fillStyle = t.c;
+                    ctx.fillRect(t.x, t.y, t.w, t.h);
+                }
+                ctx.globalAlpha = 1.0;
+            }
+
+            function draw() {
+                // 1. Clear raw canvas
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                // 2. Draw solid Grout Background (Unscaled, ensures it fills screen forever)
+                ctx.fillStyle = state.groutColor;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                // 3. Apply Zoom transform for everything else
+                ctx.save();
+                ctx.scale(state.zoom, state.zoom);
+
+                // Draw all placed tiles
+                state.placedTiles.forEach(t => {
+                    drawSingleTile(ctx, t);
+                });
+
+                // Highlight Selected
+                state.selectedTiles.forEach(t => {
+                    ctx.fillStyle = 'rgba(0, 123, 255, 0.3)';
+                    ctx.fillRect(t.x, t.y, t.w, t.h);
+                    ctx.strokeStyle = '#007bff';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(t.x, t.y, t.w, t.h);
+                });
+
+                // Drag Selection Box
+                if (state.mode === 'select' && state.isDragging) {
+                    ctx.fillStyle = 'rgba(0, 123, 255, 0.1)';
+                    ctx.fillRect(state.selectionBox.x, state.selectionBox.y, state.selectionBox.w, state.selectionBox.h);
+                    ctx.strokeStyle = '#007bff';
+                    ctx.lineWidth = 1;
+                    ctx.setLineDash([5, 5]);
+                    ctx.strokeRect(state.selectionBox.x, state.selectionBox.y, state.selectionBox.w, state.selectionBox.h);
+                    ctx.setLineDash([]);
+                }
+
+                if (state.isMouseOver) {
+                    if (state.mode === 'erase') {
+                        for (let i = state.placedTiles.length - 1; i >= 0; i--) {
+                            const t = state.placedTiles[i];
+                            if (state.mouseX >= t.x && state.mouseX <= t.x + t.w && state.mouseY >= t.y && state.mouseY <= t.y + t.h) {
+                                ctx.fillStyle = 'rgba(255, 0, 0, 0.4)';
+                                ctx.fillRect(t.x, t.y, t.w, t.h);
+                                ctx.strokeStyle = '#dc3545';
+                                ctx.lineWidth = 3;
+                                ctx.strokeRect(t.x, t.y, t.w, t.h);
+                                break; 
+                            }
+                        }
+                    } 
+                    else if (state.mode === 'paint') {
+                        const active = getActiveDimensions();
+                        for (let i = state.placedTiles.length - 1; i >= 0; i--) {
+                            const t = state.placedTiles[i];
+                            if (state.mouseX >= t.x && state.mouseX <= t.x + t.w && state.mouseY >= t.y && state.mouseY <= t.y + t.h) {
+                                drawSingleTile(ctx, { ...t, baseId: active.id, c: active.c, isRotated: t.isRotated }, 0.8);
+                                ctx.strokeStyle = '#000000';
+                                ctx.lineWidth = 3;
+                                ctx.strokeRect(t.x, t.y, t.w, t.h);
+                                break; 
+                            }
+                        }
+                    }
+                    else if (state.mode === 'place' && state.palette.length > 0) {
+                        const active = getActiveDimensions();
+                        const pos = getSnappedPosition(state.mouseX, state.mouseY, active.w, active.h);
+                        
+                        drawSingleTile(ctx, { x: pos.x, y: pos.y, w: active.w, h: active.h, c: active.c, baseId: active.id, isRotated: active.isRotated }, 0.6);
+                        
+                        ctx.strokeStyle = '#000000';
+                        ctx.lineWidth = 2;
+                        ctx.setLineDash([5, 5]);
+                        ctx.strokeRect(pos.x, pos.y, active.w, active.h);
+                        ctx.setLineDash([]); 
+                    }
+                }
+
+                // Restore canvas state (resets scale for next frame)
+                ctx.restore();
+            }
+
+            renderPalette();
+            draw();
+        });
+    </script>
+</body>
+</html>
