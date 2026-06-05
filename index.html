@@ -27,7 +27,9 @@
             overscroll-behavior-y: none; 
         }
         #sidebar {
-            width: 360px;
+            width: 420px; /* Increased default width to fit 3 columns on MacBooks */
+            min-width: 320px;
+            max-width: 600px;
             background: var(--panel-bg);
             border-right: 1px solid var(--border-color);
             padding: 20px;
@@ -36,6 +38,8 @@
             flex-direction: column;
             gap: 15px;
             overflow-y: auto;
+            overflow-x: hidden;
+            resize: horizontal; /* Allows user to drag the right edge to resize */
             box-shadow: 2px 0 5px rgba(0,0,0,0.05);
             z-index: 10;
             /* Prevent elastic scrolling in sidebar from messing with canvas */
@@ -51,7 +55,11 @@
         .button-group { display: flex; gap: 5px; }
         .button-group button { flex: 1; }
         label { font-size: 0.9rem; display: flex; justify-content: space-between; align-items: center; }
-        input[type="number"], input[type="range"] { width: 70px; padding: 4px; border: 1px solid var(--border-color); border-radius: 4px; }
+        
+        input[type="number"], input[type="range"], input[type="text"] { 
+            width: 70px; padding: 4px; border: 1px solid var(--border-color); border-radius: 4px; 
+        }
+        input[type="text"] { width: 100%; box-sizing: border-box; }
         input[type="range"] { width: 120px; padding: 0; border: none; }
         input[type="color"] { width: 40px; height: 30px; padding: 0; border: 1px solid var(--border-color); border-radius: 4px; cursor: pointer; }
         
@@ -122,9 +130,15 @@
 
     <div id="sidebar">
         <h2>Save & Load</h2>
-        <div class="button-group">
-            <button id="exportBtn" class="success">Save Design</button>
-            <button id="importBtn" class="secondary">Load Design</button>
+        <div class="control-group">
+            <label style="flex-direction: column; align-items: flex-start; gap: 5px;">
+                <strong>Design Name:</strong>
+                <input type="text" id="designName" value="My Tile Pattern">
+            </label>
+        </div>
+        <div class="button-group" style="margin-top: 5px;">
+            <button id="exportBtn" class="success">Save JSON</button>
+            <button id="importBtn" class="secondary">Load JSON</button>
         </div>
         <input type="file" id="fileInput" accept=".json" style="display: none;">
 
@@ -218,6 +232,7 @@
 
             // Master Application State
             const state = {
+                designName: 'My Tile Pattern',
                 mode: 'place', 
                 zoom: 1.0,
                 groutWidth: 3,
@@ -259,18 +274,29 @@
                 paste: document.getElementById('pasteBtn')
             };
 
+            const designNameInput = document.getElementById('designName');
+            designNameInput.addEventListener('input', (e) => {
+                state.designName = e.target.value;
+            });
+
             // Save & Load
             document.getElementById('exportBtn').onclick = () => {
                 const dataToSave = {
+                    designName: state.designName,
                     groutWidth: state.groutWidth,
                     groutColor: state.groutColor,
                     palette: state.palette,
                     placedTiles: state.placedTiles
                 };
+                
+                // Format filename to be safe for OS
+                let safeName = (state.designName || "tile-pattern").replace(/[^a-z0-9]/gi, '-').toLowerCase();
+                if (safeName === '') safeName = 'tile-pattern';
+
                 const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(dataToSave));
                 const downloadAnchorNode = document.createElement('a');
                 downloadAnchorNode.setAttribute("href", dataStr);
-                downloadAnchorNode.setAttribute("download", "tile-pattern.json");
+                downloadAnchorNode.setAttribute("download", `${safeName}.json`);
                 document.body.appendChild(downloadAnchorNode); 
                 downloadAnchorNode.click();
                 downloadAnchorNode.remove();
@@ -287,11 +313,13 @@
                     try {
                         const importedData = JSON.parse(e.target.result);
                         if (importedData.placedTiles) {
+                            state.designName = importedData.designName || "Loaded Design";
                             state.groutWidth = importedData.groutWidth !== undefined ? importedData.groutWidth : 3;
                             state.groutColor = importedData.groutColor || '#e6e6e6';
                             state.palette = importedData.palette || initialPalette;
                             state.placedTiles = importedData.placedTiles;
                             
+                            designNameInput.value = state.designName;
                             document.getElementById('groutWidth').value = state.groutWidth;
                             document.getElementById('groutColor').value = state.groutColor;
                             
@@ -410,8 +438,6 @@
             function executePaste() {
                 if (state.clipboard.length > 0) {
                     setMode('select'); 
-                    // Offset the paste from the top left corner slightly, or snap to mouse
-                    // To make it touch friendly, we paste it at the center of the viewport
                     let pasteX = state.isMouseOver ? state.mouseX : 100;
                     let pasteY = state.isMouseOver ? state.mouseY : 100;
                     
@@ -521,11 +547,6 @@
                         canvas.style.cursor = hoveringSelection ? 'grab' : 'crosshair';
                     }
                 } 
-                // Handle moving a single tile in place mode
-                else if (state.mode === 'place' && state.draggedSingleTile) {
-                    // Update happens passively on draw() based on mouse position
-                }
-
                 draw();
             }
 
@@ -537,7 +558,6 @@
             }
 
             function handlePointerDown(e) {
-                // Prevent scrolling on mobile while drawing
                 if (e.type.startsWith('touch')) e.preventDefault(); 
                 if (e.button !== undefined && e.button !== 0) return; 
 
@@ -587,7 +607,6 @@
                     }
                 } 
                 else if (state.mode === 'place') {
-                    // Try to pick up an existing tile
                     let pickedUp = false;
                     for (let i = state.placedTiles.length - 1; i >= 0; i--) {
                         const t = state.placedTiles[i];
@@ -599,7 +618,6 @@
                         }
                     }
                     
-                    // If empty space, spawn a new one to drag
                     if (!pickedUp) {
                         const active = getActiveDimensions();
                         state.draggedSingleTile = { 
@@ -636,7 +654,6 @@
                     }
                 } 
                 else if (state.mode === 'place' && state.draggedSingleTile) {
-                    // Drop single tile perfectly centered
                     const t = state.draggedSingleTile;
                     const rawX = state.mouseX - t.w / 2;
                     const rawY = state.mouseY - t.h / 2;
@@ -722,12 +739,10 @@
                 ctx.save();
                 ctx.scale(state.zoom, state.zoom);
 
-                // Draw solid placed tiles
                 state.placedTiles.forEach(t => {
                     drawSingleTile(ctx, t);
                 });
 
-                // Selection Box & Highlights
                 state.selectedTiles.forEach(t => {
                     ctx.fillStyle = 'rgba(0, 123, 255, 0.3)';
                     ctx.fillRect(t.x, t.y, t.w, t.h);
@@ -746,7 +761,6 @@
                     ctx.setLineDash([]);
                 }
 
-                // Interactive Overlays
                 if (state.isMouseOver || state.draggedSingleTile) {
                     if (state.mode === 'erase') {
                         for (let i = state.placedTiles.length - 1; i >= 0; i--) {
@@ -778,14 +792,12 @@
                         let active = state.draggedSingleTile;
                         let alpha = 0.9;
                         
-                        // If not dragging an existing tile, show ghost of active palette selection
                         if (!active && state.palette.length > 0) {
                             active = getActiveDimensions();
                             alpha = 0.6;
                         }
                         
                         if (active) {
-                            // Calculate raw top-left to ensure center is at mouse pointer
                             const rawX = state.mouseX - active.w / 2;
                             const rawY = state.mouseY - active.h / 2;
                             
