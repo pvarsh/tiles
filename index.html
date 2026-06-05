@@ -23,6 +23,8 @@
             height: 100vh;
             background-color: var(--bg-color);
             color: var(--text-color);
+            /* Prevent pull-to-refresh on mobile */
+            overscroll-behavior-y: none; 
         }
         #sidebar {
             width: 360px;
@@ -36,6 +38,8 @@
             overflow-y: auto;
             box-shadow: 2px 0 5px rgba(0,0,0,0.05);
             z-index: 10;
+            /* Prevent elastic scrolling in sidebar from messing with canvas */
+            touch-action: pan-y; 
         }
         h2 {
             font-size: 1.1rem;
@@ -55,6 +59,8 @@
             background-color: var(--accent); color: white; border: none;
             padding: 8px 12px; border-radius: 4px; cursor: pointer;
             font-size: 0.9rem; transition: background 0.2s;
+            /* Prevent double-tap zoom on iPad buttons */
+            touch-action: manipulation; 
         }
         button:hover { background-color: #0056b3; }
         button.secondary { background-color: #6c757d; }
@@ -106,6 +112,8 @@
             flex-grow: 1; overflow: auto; position: relative;
             background-image: linear-gradient(#e5e5e5 1px, transparent 1px), linear-gradient(90deg, #e5e5e5 1px, transparent 1px);
             background-size: 20px 20px;
+            /* Critical for custom drag and drop on touch devices */
+            touch-action: none; 
         }
         canvas { display: block; cursor: crosshair; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
     </style>
@@ -140,14 +148,19 @@
 
         <h2>Tools</h2>
         <button id="rotateBtn" class="secondary tool-btn">Rotate Tile 90° <span>(R)</span></button>
-        <button id="selectBtn" class="secondary tool-btn">Select / Move Tool <span>(S)</span></button>
+        <button id="selectBtn" class="secondary tool-btn">Select Box Tool <span>(S)</span></button>
         <button id="paintBtn" class="secondary tool-btn">Paint Color Tool <span>(P)</span></button>
         <button id="eraserBtn" class="secondary tool-btn">Eraser Delete Tool <span>(D)</span></button>
+        
+        <div class="button-group" style="margin-top: 5px;">
+            <button id="copyBtn" class="secondary">Copy (C)</button>
+            <button id="pasteBtn" class="secondary">Paste (V)</button>
+        </div>
 
         <div class="instructions">
             <strong>Hotkeys & Tricks:</strong><br>
-            • <b>Select Mode</b>: Click & drag over tiles to highlight, or drag highlighted tiles to move them.<br>
-            • <b>C / V</b>: Copy & Paste selected tiles.<br>
+            • <b>Place Mode</b>: Tap empty space to add tile. Tap & drag an existing tile to move it.<br>
+            • <b>Select Mode</b>: Draw box to highlight multiple tiles, then drag them together.<br>
             • <b>Esc</b>: Deselect all tiles.
         </div>
 
@@ -193,7 +206,6 @@
                 };
             });
 
-            // Image Pre-loader cache
             const loadedImages = {};
             initialPalette.forEach(tile => {
                 if (tile.src) {
@@ -217,14 +229,21 @@
                 
                 mouseX: 0, mouseY: 0,
                 isMouseOver: false,
+                
+                // Box Selection
                 isDragging: false,
                 selectionBox: { x: 0, y: 0, w: 0, h: 0 },
                 
+                // Group Dragging
                 selectedTiles: [], 
                 isDraggingSelection: false,
                 dragStartX: 0, dragStartY: 0,
                 dragAnchor: null,
                 selectionStartPos: [],
+
+                // Single Tile Dragging
+                draggedSingleTile: null,
+
                 clipboard: []      
             };
 
@@ -236,9 +255,11 @@
                 erase: document.getElementById('eraserBtn'),
                 paint: document.getElementById('paintBtn'),
                 select: document.getElementById('selectBtn'),
+                copy: document.getElementById('copyBtn'),
+                paste: document.getElementById('pasteBtn')
             };
 
-            // Save & Load Logic
+            // Save & Load
             document.getElementById('exportBtn').onclick = () => {
                 const dataToSave = {
                     groutWidth: state.groutWidth,
@@ -246,7 +267,6 @@
                     palette: state.palette,
                     placedTiles: state.placedTiles
                 };
-                
                 const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(dataToSave));
                 const downloadAnchorNode = document.createElement('a');
                 downloadAnchorNode.setAttribute("href", dataStr);
@@ -262,7 +282,6 @@
             fileInput.addEventListener('change', function(e) {
                 const file = e.target.files[0];
                 if (!file) return;
-                
                 const reader = new FileReader();
                 reader.onload = function(e) {
                     try {
@@ -291,20 +310,17 @@
                 e.target.value = ""; 
             });
 
-            // Setup Sidebar Palette UI
             function renderPalette() {
                 container.innerHTML = '';
                 state.palette.forEach(tile => {
                     const el = document.createElement('div');
                     el.className = `palette-item ${state.selectedTileId === tile.id ? 'active' : ''}`;
-                    
                     if (tile.src) {
                         el.style.backgroundColor = tile.c; 
                         el.style.backgroundImage = `url('${tile.src}')`;
                     } else {
                         el.style.backgroundColor = tile.c;
                     }
-                    
                     el.innerHTML = `<span>${tile.name}</span><span class="dim">${tile.w} x ${tile.h}</span>`;
                     
                     if (tile.name === 'WHITE' || tile.name === 'RAW') {
@@ -323,10 +339,8 @@
                 });
             }
 
-            // Mode Switching Logic
             function setMode(newMode) {
                 state.mode = (state.mode === newMode) ? 'place' : newMode;
-                
                 btns.erase.className = 'secondary tool-btn';
                 btns.paint.className = 'secondary tool-btn';
                 btns.select.className = 'secondary tool-btn';
@@ -381,18 +395,9 @@
                 }
             };
 
-            // Keyboard Shortcuts
-            window.addEventListener('keydown', (e) => {
-                const key = e.key.toLowerCase();
-                
-                if (key === 'r') { state.isRotated = !state.isRotated; draw(); }
-                if (key === 'd') setMode('erase');
-                if (key === 'p') setMode('paint');
-                if (key === 's') setMode('select');
-                if (key === 'escape') { state.selectedTiles = []; draw(); }
-
-                // COPY
-                if ((key === 'c' || (e.ctrlKey && key === 'c') || (e.metaKey && key === 'c')) && state.selectedTiles.length > 0) {
+            // Copy & Paste Handlers
+            function executeCopy() {
+                if (state.selectedTiles.length > 0) {
                     let minX = Math.min(...state.selectedTiles.map(t => t.x));
                     let minY = Math.min(...state.selectedTiles.map(t => t.y));
                     state.clipboard = state.selectedTiles.map(t => ({
@@ -400,12 +405,18 @@
                         baseId: t.baseId, isRotated: t.isRotated 
                     }));
                 }
+            }
 
-                // PASTE
-                if ((key === 'v' || (e.ctrlKey && key === 'v') || (e.metaKey && key === 'v')) && state.clipboard.length > 0 && state.isMouseOver) {
+            function executePaste() {
+                if (state.clipboard.length > 0) {
                     setMode('select'); 
-                    let snapX = Math.round(state.mouseX / 10) * 10;
-                    let snapY = Math.round(state.mouseY / 10) * 10;
+                    // Offset the paste from the top left corner slightly, or snap to mouse
+                    // To make it touch friendly, we paste it at the center of the viewport
+                    let pasteX = state.isMouseOver ? state.mouseX : 100;
+                    let pasteY = state.isMouseOver ? state.mouseY : 100;
+                    
+                    let snapX = Math.round(pasteX / 10) * 10;
+                    let snapY = Math.round(pasteY / 10) * 10;
                     
                     state.clipboard.forEach(t => {
                         state.placedTiles.push({
@@ -417,6 +428,21 @@
                     state.selectedTiles = state.placedTiles.slice(-state.clipboard.length);
                     draw();
                 }
+            }
+
+            btns.copy.onclick = executeCopy;
+            btns.paste.onclick = executePaste;
+
+            // Keyboard Shortcuts
+            window.addEventListener('keydown', (e) => {
+                const key = e.key.toLowerCase();
+                if (key === 'r') { state.isRotated = !state.isRotated; draw(); }
+                if (key === 'd') setMode('erase');
+                if (key === 'p') setMode('paint');
+                if (key === 's') setMode('select');
+                if (key === 'escape') { state.selectedTiles = []; draw(); }
+                if ((key === 'c' || (e.ctrlKey && key === 'c') || (e.metaKey && key === 'c'))) executeCopy();
+                if ((key === 'v' || (e.ctrlKey && key === 'v') || (e.metaKey && key === 'v'))) executePaste();
             });
 
             function getActiveDimensions() {
@@ -430,16 +456,34 @@
                 };
             }
 
-            // Mouse Interaction Logic (Factoring in Zoom)
-            canvas.addEventListener('mousemove', (e) => {
+            // Universal Pointer Resolver (Normalizes Mouse and Touch coordinates)
+            function getPointerPos(e) {
                 const rect = canvas.getBoundingClientRect();
                 const scaleX = canvas.width / rect.width;
                 const scaleY = canvas.height / rect.height;
-                
-                // Adjust for zoom scale dynamically
-                state.mouseX = ((e.clientX - rect.left) * scaleX) / state.zoom;
-                state.mouseY = ((e.clientY - rect.top) * scaleY) / state.zoom;
-                
+                let clientX, clientY;
+
+                if (e.touches && e.touches.length > 0) {
+                    clientX = e.touches[0].clientX;
+                    clientY = e.touches[0].clientY;
+                } else if (e.changedTouches && e.changedTouches.length > 0) {
+                    clientX = e.changedTouches[0].clientX;
+                    clientY = e.changedTouches[0].clientY;
+                } else {
+                    clientX = e.clientX;
+                    clientY = e.clientY;
+                }
+
+                return {
+                    x: ((clientX - rect.left) * scaleX) / state.zoom,
+                    y: ((clientY - rect.top) * scaleY) / state.zoom
+                };
+            }
+
+            function handlePointerMove(e) {
+                const pos = getPointerPos(e);
+                state.mouseX = pos.x;
+                state.mouseY = pos.y;
                 state.isMouseOver = true;
 
                 if (state.mode === 'select') {
@@ -450,7 +494,6 @@
 
                     if (state.isDraggingSelection) {
                         canvas.style.cursor = 'grabbing';
-                        
                         let anchorStart = state.selectionStartPos.find(s => s.t === state.dragAnchor);
                         let targetX = anchorStart.x + (state.mouseX - state.dragStartX);
                         let targetY = anchorStart.y + (state.mouseY - state.dragStartY);
@@ -460,7 +503,6 @@
                         state.placedTiles = unselectedTiles;
 
                         let pos = getSnappedPosition(targetX, targetY, state.dragAnchor.w, state.dragAnchor.h);
-
                         state.placedTiles = tempPlaced;
 
                         let actualDx = pos.x - anchorStart.x;
@@ -478,19 +520,31 @@
                     } else {
                         canvas.style.cursor = hoveringSelection ? 'grab' : 'crosshair';
                     }
+                } 
+                // Handle moving a single tile in place mode
+                else if (state.mode === 'place' && state.draggedSingleTile) {
+                    // Update happens passively on draw() based on mouse position
                 }
-                draw();
-            });
 
-            canvas.addEventListener('mouseleave', () => {
+                draw();
+            }
+
+            function handlePointerLeave() {
                 state.isMouseOver = false;
                 if (state.isDragging) state.isDragging = false;
                 if (state.isDraggingSelection) state.isDraggingSelection = false;
                 draw();
-            });
+            }
 
-            canvas.addEventListener('mousedown', (e) => {
-                if (e.button !== 0) return; 
+            function handlePointerDown(e) {
+                // Prevent scrolling on mobile while drawing
+                if (e.type.startsWith('touch')) e.preventDefault(); 
+                if (e.button !== undefined && e.button !== 0) return; 
+
+                const pos = getPointerPos(e);
+                state.mouseX = pos.x;
+                state.mouseY = pos.y;
+                state.isMouseOver = true;
 
                 if (state.mode === 'select') {
                     let clickedSelected = state.selectedTiles.some(t => 
@@ -509,7 +563,6 @@
 
                     state.isDragging = true;
                     state.selectionBox = { x: state.mouseX, y: state.mouseY, w: 0, h: 0 };
-                    
                     if (!e.shiftKey) state.selectedTiles = []; 
                 } 
                 else if (state.mode === 'erase') {
@@ -534,27 +587,37 @@
                     }
                 } 
                 else if (state.mode === 'place') {
-                    const active = getActiveDimensions();
-                    const pos = getSnappedPosition(state.mouseX, state.mouseY, active.w, active.h);
-                    state.placedTiles.push({
-                        x: pos.x, y: pos.y, w: active.w, h: active.h, c: active.c, 
-                        baseId: active.id, isRotated: active.isRotated
-                    });
+                    // Try to pick up an existing tile
+                    let pickedUp = false;
+                    for (let i = state.placedTiles.length - 1; i >= 0; i--) {
+                        const t = state.placedTiles[i];
+                        if (state.mouseX >= t.x && state.mouseX <= t.x + t.w && state.mouseY >= t.y && state.mouseY <= t.y + t.h) {
+                            state.draggedSingleTile = t;
+                            state.placedTiles.splice(i, 1);
+                            pickedUp = true;
+                            break;
+                        }
+                    }
+                    
+                    // If empty space, spawn a new one to drag
+                    if (!pickedUp) {
+                        const active = getActiveDimensions();
+                        state.draggedSingleTile = { 
+                            x: 0, y: 0, w: active.w, h: active.h, c: active.c, 
+                            baseId: active.id, isRotated: active.isRotated 
+                        };
+                    }
                 }
                 draw();
-            });
+            }
 
-            canvas.addEventListener('mouseup', (e) => {
-                if (e.button !== 0) return;
-                
+            function handlePointerUp(e) {
+                if (e.button !== undefined && e.button !== 0) return;
+
                 if (state.mode === 'select') {
                     if (state.isDraggingSelection) {
                         state.isDraggingSelection = false;
-                        draw();
-                        return;
-                    }
-
-                    if (state.isDragging) {
+                    } else if (state.isDragging) {
                         state.isDragging = false;
                         
                         let rx = state.selectionBox.w < 0 ? state.selectionBox.x + state.selectionBox.w : state.selectionBox.x;
@@ -570,16 +633,39 @@
                             }
                         });
                         state.selectionBox = { x: 0, y: 0, w: 0, h: 0 };
-                        draw();
                     }
+                } 
+                else if (state.mode === 'place' && state.draggedSingleTile) {
+                    // Drop single tile perfectly centered
+                    const t = state.draggedSingleTile;
+                    const rawX = state.mouseX - t.w / 2;
+                    const rawY = state.mouseY - t.h / 2;
+                    const pos = getSnappedPosition(rawX, rawY, t.w, t.h);
+                    
+                    t.x = pos.x;
+                    t.y = pos.y;
+                    state.placedTiles.push(t);
+                    state.draggedSingleTile = null;
                 }
-            });
+                draw();
+            }
 
-            function getSnappedPosition(mx, my, previewW, previewH) {
-                let snapX = Math.round(mx / 10) * 10;
-                let snapY = Math.round(my / 10) * 10;
-                
-                // Adjust snapping strength based on zoom level so it feels consistent
+            // Unified Event Listeners (Mouse + Touch)
+            canvas.addEventListener('mousemove', handlePointerMove);
+            canvas.addEventListener('touchmove', handlePointerMove, { passive: false });
+            
+            canvas.addEventListener('mouseleave', handlePointerLeave);
+            canvas.addEventListener('touchcancel', handlePointerLeave);
+            
+            canvas.addEventListener('mousedown', handlePointerDown);
+            canvas.addEventListener('touchstart', handlePointerDown, { passive: false });
+            
+            canvas.addEventListener('mouseup', handlePointerUp);
+            canvas.addEventListener('touchend', handlePointerUp);
+
+            function getSnappedPosition(rawX, rawY, previewW, previewH) {
+                let snapX = Math.round(rawX / 10) * 10;
+                let snapY = Math.round(rawY / 10) * 10;
                 const snapDist = 15 / state.zoom; 
                 const gw = state.groutWidth;
 
@@ -597,9 +683,9 @@
                 });
 
                 let minDiffX = snapDist;
-                xLines.forEach(line => { if (Math.abs(mx - line) < minDiffX) { minDiffX = Math.abs(mx - line); snapX = line; }});
+                xLines.forEach(line => { if (Math.abs(rawX - line) < minDiffX) { minDiffX = Math.abs(rawX - line); snapX = line; }});
                 let minDiffY = snapDist;
-                yLines.forEach(line => { if (Math.abs(my - line) < minDiffY) { minDiffY = Math.abs(my - line); snapY = line; }});
+                yLines.forEach(line => { if (Math.abs(rawY - line) < minDiffY) { minDiffY = Math.abs(rawY - line); snapY = line; }});
 
                 return { x: snapX, y: snapY };
             }
@@ -613,7 +699,6 @@
                 if (img && img.complete && img.naturalWidth !== 0) {
                     ctx.save();
                     ctx.translate(t.x + t.w / 2, t.y + t.h / 2);
-                    
                     if (t.isRotated) {
                         ctx.rotate(90 * Math.PI / 180);
                         ctx.drawImage(img, -t.h / 2, -t.w / 2, t.h, t.w);
@@ -629,23 +714,20 @@
             }
 
             function draw() {
-                // 1. Clear raw canvas
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-                // 2. Draw solid Grout Background (Unscaled, ensures it fills screen forever)
                 ctx.fillStyle = state.groutColor;
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-                // 3. Apply Zoom transform for everything else
                 ctx.save();
                 ctx.scale(state.zoom, state.zoom);
 
-                // Draw all placed tiles
+                // Draw solid placed tiles
                 state.placedTiles.forEach(t => {
                     drawSingleTile(ctx, t);
                 });
 
-                // Highlight Selected
+                // Selection Box & Highlights
                 state.selectedTiles.forEach(t => {
                     ctx.fillStyle = 'rgba(0, 123, 255, 0.3)';
                     ctx.fillRect(t.x, t.y, t.w, t.h);
@@ -654,7 +736,6 @@
                     ctx.strokeRect(t.x, t.y, t.w, t.h);
                 });
 
-                // Drag Selection Box
                 if (state.mode === 'select' && state.isDragging) {
                     ctx.fillStyle = 'rgba(0, 123, 255, 0.1)';
                     ctx.fillRect(state.selectionBox.x, state.selectionBox.y, state.selectionBox.w, state.selectionBox.h);
@@ -665,7 +746,8 @@
                     ctx.setLineDash([]);
                 }
 
-                if (state.isMouseOver) {
+                // Interactive Overlays
+                if (state.isMouseOver || state.draggedSingleTile) {
                     if (state.mode === 'erase') {
                         for (let i = state.placedTiles.length - 1; i >= 0; i--) {
                             const t = state.placedTiles[i];
@@ -692,21 +774,33 @@
                             }
                         }
                     }
-                    else if (state.mode === 'place' && state.palette.length > 0) {
-                        const active = getActiveDimensions();
-                        const pos = getSnappedPosition(state.mouseX, state.mouseY, active.w, active.h);
+                    else if (state.mode === 'place') {
+                        let active = state.draggedSingleTile;
+                        let alpha = 0.9;
                         
-                        drawSingleTile(ctx, { x: pos.x, y: pos.y, w: active.w, h: active.h, c: active.c, baseId: active.id, isRotated: active.isRotated }, 0.6);
+                        // If not dragging an existing tile, show ghost of active palette selection
+                        if (!active && state.palette.length > 0) {
+                            active = getActiveDimensions();
+                            alpha = 0.6;
+                        }
                         
-                        ctx.strokeStyle = '#000000';
-                        ctx.lineWidth = 2;
-                        ctx.setLineDash([5, 5]);
-                        ctx.strokeRect(pos.x, pos.y, active.w, active.h);
-                        ctx.setLineDash([]); 
+                        if (active) {
+                            // Calculate raw top-left to ensure center is at mouse pointer
+                            const rawX = state.mouseX - active.w / 2;
+                            const rawY = state.mouseY - active.h / 2;
+                            
+                            const pos = getSnappedPosition(rawX, rawY, active.w, active.h);
+                            drawSingleTile(ctx, { x: pos.x, y: pos.y, w: active.w, h: active.h, c: active.c, baseId: active.id, isRotated: active.isRotated }, alpha);
+                            
+                            ctx.strokeStyle = '#000000';
+                            ctx.lineWidth = 2;
+                            ctx.setLineDash([5, 5]);
+                            ctx.strokeRect(pos.x, pos.y, active.w, active.h);
+                            ctx.setLineDash([]); 
+                        }
                     }
                 }
 
-                // Restore canvas state (resets scale for next frame)
                 ctx.restore();
             }
 
