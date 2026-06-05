@@ -27,7 +27,7 @@
             overscroll-behavior-y: none; 
         }
         #sidebar {
-            width: 420px; /* Increased default width to fit 3 columns on MacBooks */
+            width: 420px; 
             min-width: 320px;
             max-width: 600px;
             background: var(--panel-bg);
@@ -39,7 +39,7 @@
             gap: 15px;
             overflow-y: auto;
             overflow-x: hidden;
-            resize: horizontal; /* Allows user to drag the right edge to resize */
+            resize: horizontal; 
             box-shadow: 2px 0 5px rgba(0,0,0,0.05);
             z-index: 10;
             /* Prevent elastic scrolling in sidebar from messing with canvas */
@@ -175,6 +175,7 @@
             <strong>Hotkeys & Tricks:</strong><br>
             • <b>Place Mode</b>: Tap empty space to add tile. Tap & drag an existing tile to move it.<br>
             • <b>Select Mode</b>: Draw box to highlight multiple tiles, then drag them together.<br>
+            • <b>Pan</b>: Use two fingers to scroll the canvas on touch devices.<br>
             • <b>Esc</b>: Deselect all tiles.
         </div>
 
@@ -259,12 +260,18 @@
                 // Single Tile Dragging
                 draggedSingleTile: null,
 
+                // Two-Finger Panning
+                isPanning: false,
+                lastPanX: 0,
+                lastPanY: 0,
+
                 clipboard: []      
             };
 
             const canvas = document.getElementById('tileCanvas');
             const ctx = canvas.getContext('2d');
             const container = document.getElementById('palette');
+            const workspace = document.getElementById('workspace');
             
             const btns = {
                 erase: document.getElementById('eraserBtn'),
@@ -289,7 +296,6 @@
                     placedTiles: state.placedTiles
                 };
                 
-                // Format filename to be safe for OS
                 let safeName = (state.designName || "tile-pattern").replace(/[^a-z0-9]/gi, '-').toLowerCase();
                 if (safeName === '') safeName = 'tile-pattern';
 
@@ -438,8 +444,8 @@
             function executePaste() {
                 if (state.clipboard.length > 0) {
                     setMode('select'); 
-                    let pasteX = state.isMouseOver ? state.mouseX : 100;
-                    let pasteY = state.isMouseOver ? state.mouseY : 100;
+                    let pasteX = state.isMouseOver ? state.mouseX : (workspace.scrollLeft / state.zoom) + 100;
+                    let pasteY = state.isMouseOver ? state.mouseY : (workspace.scrollTop / state.zoom) + 100;
                     
                     let snapX = Math.round(pasteX / 10) * 10;
                     let snapY = Math.round(pasteY / 10) * 10;
@@ -459,7 +465,6 @@
             btns.copy.onclick = executeCopy;
             btns.paste.onclick = executePaste;
 
-            // Keyboard Shortcuts
             window.addEventListener('keydown', (e) => {
                 const key = e.key.toLowerCase();
                 if (key === 'r') { state.isRotated = !state.isRotated; draw(); }
@@ -482,7 +487,6 @@
                 };
             }
 
-            // Universal Pointer Resolver (Normalizes Mouse and Touch coordinates)
             function getPointerPos(e) {
                 const rect = canvas.getBoundingClientRect();
                 const scaleX = canvas.width / rect.width;
@@ -506,60 +510,18 @@
                 };
             }
 
-            function handlePointerMove(e) {
-                const pos = getPointerPos(e);
-                state.mouseX = pos.x;
-                state.mouseY = pos.y;
-                state.isMouseOver = true;
-
-                if (state.mode === 'select') {
-                    let hoveringSelection = state.selectedTiles.some(t => 
-                        state.mouseX >= t.x && state.mouseX <= t.x + t.w && 
-                        state.mouseY >= t.y && state.mouseY <= t.y + t.h
-                    );
-
-                    if (state.isDraggingSelection) {
-                        canvas.style.cursor = 'grabbing';
-                        let anchorStart = state.selectionStartPos.find(s => s.t === state.dragAnchor);
-                        let targetX = anchorStart.x + (state.mouseX - state.dragStartX);
-                        let targetY = anchorStart.y + (state.mouseY - state.dragStartY);
-
-                        let unselectedTiles = state.placedTiles.filter(t => !state.selectedTiles.includes(t));
-                        let tempPlaced = state.placedTiles;
-                        state.placedTiles = unselectedTiles;
-
-                        let pos = getSnappedPosition(targetX, targetY, state.dragAnchor.w, state.dragAnchor.h);
-                        state.placedTiles = tempPlaced;
-
-                        let actualDx = pos.x - anchorStart.x;
-                        let actualDy = pos.y - anchorStart.y;
-
-                        state.selectionStartPos.forEach(s => {
-                            s.t.x = s.x + actualDx;
-                            s.t.y = s.y + actualDy;
-                        });
-
-                    } else if (state.isDragging) {
-                        state.selectionBox.w = state.mouseX - state.selectionBox.x;
-                        state.selectionBox.h = state.mouseY - state.selectionBox.y;
-                        canvas.style.cursor = 'crosshair';
-                    } else {
-                        canvas.style.cursor = hoveringSelection ? 'grab' : 'crosshair';
-                    }
-                } 
-                draw();
-            }
-
-            function handlePointerLeave() {
-                state.isMouseOver = false;
-                if (state.isDragging) state.isDragging = false;
-                if (state.isDraggingSelection) state.isDraggingSelection = false;
-                draw();
-            }
-
             function handlePointerDown(e) {
                 if (e.type.startsWith('touch')) e.preventDefault(); 
                 if (e.button !== undefined && e.button !== 0) return; 
+
+                // --- Two Finger Pan Intercept ---
+                if (e.touches && e.touches.length === 2) {
+                    state.isPanning = true;
+                    state.lastPanX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+                    state.lastPanY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+                    return; // Skip normal tool logic
+                }
+                if (state.isPanning) return; // Prevent 1-finger tool firing while releasing a pan
 
                 const pos = getPointerPos(e);
                 state.mouseX = pos.x;
@@ -629,8 +591,77 @@
                 draw();
             }
 
+            function handlePointerMove(e) {
+                if (e.type.startsWith('touch')) e.preventDefault(); 
+
+                // --- Two Finger Pan Logic ---
+                if (state.isPanning && e.touches && e.touches.length === 2) {
+                    const currentX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+                    const currentY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+                    
+                    // Apply delta directly to container scroll
+                    workspace.scrollLeft -= (currentX - state.lastPanX);
+                    workspace.scrollTop -= (currentY - state.lastPanY);
+
+                    state.lastPanX = currentX;
+                    state.lastPanY = currentY;
+                    return;
+                }
+                if (state.isPanning) return; // Prevent ghost drag during pan release
+
+                const pos = getPointerPos(e);
+                state.mouseX = pos.x;
+                state.mouseY = pos.y;
+                state.isMouseOver = true;
+
+                if (state.mode === 'select') {
+                    let hoveringSelection = state.selectedTiles.some(t => 
+                        state.mouseX >= t.x && state.mouseX <= t.x + t.w && 
+                        state.mouseY >= t.y && state.mouseY <= t.y + t.h
+                    );
+
+                    if (state.isDraggingSelection) {
+                        canvas.style.cursor = 'grabbing';
+                        let anchorStart = state.selectionStartPos.find(s => s.t === state.dragAnchor);
+                        let targetX = anchorStart.x + (state.mouseX - state.dragStartX);
+                        let targetY = anchorStart.y + (state.mouseY - state.dragStartY);
+
+                        let unselectedTiles = state.placedTiles.filter(t => !state.selectedTiles.includes(t));
+                        let tempPlaced = state.placedTiles;
+                        state.placedTiles = unselectedTiles;
+
+                        let pos = getSnappedPosition(targetX, targetY, state.dragAnchor.w, state.dragAnchor.h);
+                        state.placedTiles = tempPlaced;
+
+                        let actualDx = pos.x - anchorStart.x;
+                        let actualDy = pos.y - anchorStart.y;
+
+                        state.selectionStartPos.forEach(s => {
+                            s.t.x = s.x + actualDx;
+                            s.t.y = s.y + actualDy;
+                        });
+
+                    } else if (state.isDragging) {
+                        state.selectionBox.w = state.mouseX - state.selectionBox.x;
+                        state.selectionBox.h = state.mouseY - state.selectionBox.y;
+                        canvas.style.cursor = 'crosshair';
+                    } else {
+                        canvas.style.cursor = hoveringSelection ? 'grab' : 'crosshair';
+                    }
+                } 
+                draw();
+            }
+
             function handlePointerUp(e) {
                 if (e.button !== undefined && e.button !== 0) return;
+
+                // --- Two Finger Pan End ---
+                if (e.changedTouches && state.isPanning) {
+                    if (e.touches.length < 2) {
+                        state.isPanning = false;
+                        return; // Exit to avoid triggering single-touch drops
+                    }
+                }
 
                 if (state.mode === 'select') {
                     if (state.isDraggingSelection) {
@@ -667,7 +698,14 @@
                 draw();
             }
 
-            // Unified Event Listeners (Mouse + Touch)
+            function handlePointerLeave(e) {
+                state.isMouseOver = false;
+                if (state.isDragging) state.isDragging = false;
+                if (state.isDraggingSelection) state.isDraggingSelection = false;
+                state.isPanning = false;
+                draw();
+            }
+
             canvas.addEventListener('mousemove', handlePointerMove);
             canvas.addEventListener('touchmove', handlePointerMove, { passive: false });
             
